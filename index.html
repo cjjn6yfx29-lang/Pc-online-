@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Desktop Launcher</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            overflow: hidden; 
+        }
+        .desktop {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            padding-bottom: 40px; 
+        }
+        .icon-item {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            cursor: pointer;
+            text-align: center;
+            user-select: none;
+            transition: transform 0.1s;
+        }
+        .icon-item:hover {
+            transform: scale(1.05);
+        }
+        .icon-label {
+             text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.7);
+        }
+        .window {
+            position: absolute;
+            min-width: 200px;
+            min-height: 150px;
+            max-width: 95vw;
+            max-height: 95vh;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            resize: both; 
+            opacity: 0; 
+            animation: fadeIn 0.3s forwards;
+            background-color: #111827; /* Darker background for content */
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .window-title-bar {
+            cursor: grab;
+            background-color: rgba(55, 65, 81, 0.9);
+        }
+        .maximized {
+            width: 100vw !important;
+            height: calc(100vh - 40px) !important;
+            top: 0 !important;
+            left: 0 !important;
+            min-width: 100vw !important;
+            min-height: 100vh !important;
+            border-radius: 0;
+            transition: all 0.2s ease;
+        }
+        
+        .window-content {
+            overflow: auto; 
+        }
+
+        /* Fixed Taskbar at the bottom */
+        .taskbar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 40px;
+            background-color: #1f2937;
+            border-top: 1px solid #374151;
+            z-index: 6000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 10px;
+            box-shadow: 0 -5px 15px rgba(0, 0, 0, 0.3);
+        }
+        
+        /* New Clock Design Container */
+        .desktop-clock-style {
+            background-color: rgba(255, 255, 255, 0.1); /* Semi-transparent white */
+            backdrop-filter: blur(8px); /* Frosted glass effect */
+            -webkit-backdrop-filter: blur(8px);
+            padding: 0.5rem 1rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            font-weight: 500;
+            letter-spacing: 0.05em;
+            transition: all 0.2s;
+        }
+
+
+        /* File Explorer Specific Styles */
+        .file-list-row:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+            cursor: pointer;
+        }
+        .drop-area {
+            border: 2px dashed #4b5563;
+            background-color: #1f2937;
+            transition: border-color 0.2s, background-color 0.2s;
+        }
+        .drop-area-hover {
+            border-color: #3b82f6;
+            background-color: #0f172a;
+        }
+        
+        /* Utility for mobile responsiveness of icons */
+        @media (max-width: 640px) {
+            .desktop { padding-top: 10px; }
+            .icon-item {
+                position: static;
+                display: inline-block;
+                margin: 10px;
+                width: 70px;
+                height: 70px;
+            }
+            .desktop-icons-container {
+                display: flex;
+                flex-wrap: wrap;
+                padding: 10px;
+                justify-content: flex-start;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white select-none">
+
+    <!-- Main Desktop Container -->
+    <div id="desktop" class="desktop">
+        
+        <!-- Clock Display Container (Top Right Position) -->
+        <div id="desktop-clock-container" class="absolute top-4 right-4 z-[5000] transition-opacity duration-300">
+            <span id="desktop-clock" class="desktop-clock-style block"></span>
+        </div>
+        
+        <!-- Icons will be injected here -->
+        <div id="desktop-icons-container" class="desktop-icons-container p-4"></div>
+        
+        <!-- Windows will be injected here -->
+        <div id="windows-container"></div>
+    </div>
+
+    <!-- Persistent Taskbar and Status Bar (Bottom) -->
+    <div class="taskbar">
+        <div class="flex items-center space-x-4">
+            <span id="status-message" class="text-sm text-green-400">Status: Data is saving to Local Browser Storage.</span>
+        </div>
+        
+        <!-- Minimized Windows Taskbar Area -->
+        <div id="minimized-windows" class="flex space-x-3">
+            <!-- Minimized app buttons go here -->
+        </div>
+
+        <div class="flex items-center space-x-4">
+            <span class="text-xs text-gray-400 hidden sm:block">Client-Side OS v3.2</span>
+        </div>
+    </div>
+
+    <!-- JavaScript Application Logic -->
+    <script>
+        // --- Globals & Local Storage Persistence ---
+        const STORAGE_KEY = 'webos_state_v3_file_storage'; 
+
+        let ICON_POSITIONS = {}; 
+        let DESKTOP_SETTINGS = { 
+            desktopColor: 'bg-gray-800', 
+            backgroundImage: null,
+            // Clock settings
+            showClock: true, 
+            clockSize: 'md', 
+            clockFormat: '12hr' 
+        };
+        let USER_FILES = []; 
+        let zIndexCounter = 1000;
+        let openWindows = [];
+        
+        const saveState = () => {
+            const stateToSave = {
+                ICON_POSITIONS: ICON_POSITIONS,
+                DESKTOP_SETTINGS: DESKTOP_SETTINGS, 
+                USER_FILES: USER_FILES 
+            };
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
+                document.getElementById('status-message').textContent = 'Status: Data saved.';
+                document.getElementById('status-message').classList.remove('text-red-400', 'text-yellow-400');
+                document.getElementById('status-message').classList.add('text-green-400');
+            } catch (e) {
+                console.error("Error saving to localStorage:", e);
+                document.getElementById('status-message').textContent = `Status: ERROR saving data! Storage limit may be reached.`;
+                document.getElementById('status-message').classList.replace('text-green-400', 'text-red-400');
+            }
+        };
+
+        const loadState = () => {
+            try {
+                const savedState = localStorage.getItem(STORAGE_KEY);
+                if (savedState) {
+                    const state = JSON.parse(savedState);
+                    ICON_POSITIONS = state.ICON_POSITIONS || ICON_POSITIONS;
+                    // Merge loaded settings with defaults to handle new keys (like clock settings)
+                    DESKTOP_SETTINGS = { ...DESKTOP_SETTINGS, ...state.DESKTOP_SETTINGS }; 
+                    USER_FILES = state.USER_FILES || []; 
+                }
+            } catch (e) {
+                console.error("Error loading state from localStorage, using defaults.", e);
+            }
+        };
+
+        // --- Clock Implementation ---
+
+        const updateClock = () => {
+            const clockElement = document.getElementById('desktop-clock');
+            const containerElement = document.getElementById('desktop-clock-container');
+            if (!clockElement || !containerElement) return;
+
+            // 1. Visibility Check
+            if (!DESKTOP_SETTINGS.showClock) {
+                containerElement.classList.add('opacity-0', 'pointer-events-none');
+                return;
+            }
+            containerElement.classList.remove('opacity-0', 'pointer-events-none');
+            
+            // 2. Format and Size Application
+            const now = new Date();
+            let timeString;
+            let sizeClass;
+
+            if (DESKTOP_SETTINGS.clockFormat === '12hr') {
+                timeString = now.toLocaleTimeString('en-US', { 
+                    hour: '2-digit', 
+                    minute: '2-digit', 
+                    hour12: true 
+                });
+            } else {
+                timeString = now.toLocaleTimeString('en-US', { 
+                    hour: '2-digit', 
+                    minute: '2-digit', 
+                    hour12: false 
+                });
+            }
+
+            const dateString = now.toLocaleDateString('en-US', { 
+                month: 'short', 
+                day: 'numeric' 
+            });
+            
+            // Apply size classes to the clock span
+            clockElement.classList.remove('text-sm', 'text-base', 'text-xl', 'font-normal', 'font-semibold');
+            
+            switch (DESKTOP_SETTINGS.clockSize) {
+                case 'sm':
+                    sizeClass = 'text-sm font-normal';
+                    break;
+                case 'lg':
+                    sizeClass = 'text-xl font-bold';
+                    break;
+                case 'md':
+                default:
+                    sizeClass = 'text-base font-semibold';
+                    break;
+            }
+            clockElement.classList.add(sizeClass);
+
+            // 3. Update Content
+            clockElement.textContent = `${timeString} | ${dateString}`;
+        };
+
+
+        // --- Core Application Data ---
+
+        const APP_DEFINITIONS = [
+            { id: 'browser', name: 'Kurdish Translate', icon: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-2-6h4a2 2 0 002-2V8a2 2 0 00-2-2h-4a2 2 0 00-2 2v4a2 2 0 002 2zm-4-4H4v-2h2v2zm12 0h2v-2h-2v2z', url: 'https://kurdish-translate.vercel.app' },
+            { id: 'settings', name: 'Settings', icon: 'M19.4 12.98c.04-.32.06-.64.06-.98s-.02-.66-.06-.98l2.21-1.71c.2-.16.26-.46.15-.71l-2.09-3.63c-.11-.2-.33-.29-.53-.21l-2.55 1.05c-.5-.38-1.07-.67-1.7-.86L14.73 3.4c-.06-.25-.3-.4-.56-.4h-4.18c-.27 0-.5.15-.56.4l-.48 2.36c-.63.19-1.2.48-1.7.86l-2.55-1.05c-.2-.08-.42.01-.53.21l-2.09 3.63c-.11.25-.05.55.15.71l2.21 1.71c-.04.32-.06.64-.06.98s.02.66.06.98l-2.21 1.71c-.2.16-.26.46-.15.71l2.09 3.63c.11.2.33.29.53.21l2.55 1.05c.2.08-.42.01-.53.21l2.09-3.63c.11-.25.05-.55-.15-.71l-2.21-1.71zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z' },
+            { id: 'notes', name: 'Notes', icon: 'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z' },
+            { id: 'my-pc', name: 'My PC', icon: 'M13 4v4h-2V4h2m6 16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3v2h3v12H8V6h3V4H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14zM8 12c.7-.7 1.6-1.1 2.5-1.1s1.8.4 2.5 1.1c-.7.7-1.6 1.1-2.5 1.1s-1.8-.4-2.5-1.1z' }
+        ];
+
+        // --- Icon Handling (Drag and Drop) ---
+
+        let activeDragIcon = null;
+        let offset = { x: 0, y: 0 };
+
+        const startDrag = (e, iconElement) => {
+            if (e.target.closest('.icon-label')) return; 
+
+            activeDragIcon = iconElement;
+            iconElement.style.transition = 'none';
+
+            const rect = iconElement.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+            offset.x = clientX - rect.left;
+            offset.y = clientY - rect.top;
+
+            iconElement.dataset.isDragging = 'true';
+
+            document.addEventListener('mousemove', dragMove);
+            document.addEventListener('mouseup', dragEnd);
+            document.addEventListener('touchmove', dragMove);
+            document.addEventListener('touchend', dragEnd);
+        };
+
+        const dragMove = (e) => {
+            if (!activeDragIcon) return;
+            e.preventDefault(); 
+
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+            let newX = clientX - offset.x;
+            let newY = clientY - offset.y;
+
+            newX = Math.max(0, Math.min(newX, window.innerWidth - activeDragIcon.offsetWidth));
+            newY = Math.max(0, Math.min(newY, window.innerHeight - activeDragIcon.offsetHeight - 40)); 
+
+            activeDragIcon.style.left = `${newX}px`;
+            activeDragIcon.style.top = `${newY}px`;
+        };
+
+        const dragEnd = () => {
+            if (!activeDragIcon) return;
+
+            setTimeout(() => {
+                activeDragIcon.dataset.isDragging = 'false';
+            }, 100);
+
+            ICON_POSITIONS[activeDragIcon.id] = {
+                x: activeDragIcon.offsetLeft,
+                y: activeDragIcon.offsetTop
+            };
+            saveState(); 
+            
+            activeDragIcon.style.transition = 'transform 0.1s';
+            activeDragIcon = null;
+
+            document.removeEventListener('mousemove', dragMove);
+            document.removeEventListener('mouseup', dragEnd);
+            document.removeEventListener('touchmove', dragMove);
+            document.removeEventListener('touchend', dragEnd);
+        };
+
+        // --- File Management Helpers ---
+
+        const formatBytes = (bytes, decimals = 2) => {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        };
+
+        const getFileTypeIcon = (mimeType) => {
+            if (mimeType.startsWith('image/')) return '🖼️';
+            if (mimeType.startsWith('video/')) return '🎬';
+            if (mimeType.includes('pdf')) return '📄';
+            if (mimeType.includes('text/') || mimeType.includes('html')) return '📝';
+            return '📁';
+        };
+        
+        // --- File Upload Logic ---
+
+        window.handleFiles = (files) => {
+            if (!files || files.length === 0) return;
+
+            const file = files[0];
+            const maxSizeBytes = 5 * 1024 * 1024; // 5MB limit for Base64 storage
+
+            if (file.size > maxSizeBytes) {
+                 document.getElementById('status-message').textContent = `Status: File "${file.name}" is too large (>5MB) for local storage.`;
+                 document.getElementById('status-message').classList.replace('text-green-400', 'text-yellow-400');
+                 return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const newFile = {
+                    id: crypto.randomUUID(),
+                    name: file.name,
+                    type: file.type || 'application/octet-stream',
+                    size: file.size,
+                    data: e.target.result // Base64 content
+                };
+                
+                USER_FILES.push(newFile);
+                saveState();
+                renderFileList();
+            };
+            reader.onerror = () => {
+                document.getElementById('status-message').textContent = `Status: Failed to read file: ${file.name}`;
+                document.getElementById('status-message').classList.replace('text-green-400', 'text-red-400');
+            };
+            reader.readAsDataURL(file);
+        };
+        
+        window.deleteFile = (id) => {
+            USER_FILES = USER_FILES.filter(f => f.id !== id);
+            saveState();
+            renderFileList();
+        };
+
+        // --- File Viewer Window ---
+
+        const createFileViewerWindow = (file) => {
+            const id = `viewer-${file.id}`;
+            const existingWindow = openWindows.find(w => w.id === id);
+            if (existingWindow) {
+                focusWindow(id);
+                return;
+            }
+
+            let viewerContent;
+            
+            if (file.type.startsWith('image/')) {
+                // Image viewer
+                viewerContent = `<img src="${file.data}" class="max-w-full max-h-full object-contain mx-auto" style="display: block;">`;
+            } else if (file.type.startsWith('text/') || file.type.includes('html') || file.type.includes('pdf') || file.type.startsWith('video/')) {
+                // PDF, Video, HTML, or large text file viewer (using iframe)
+                viewerContent = `
+                    <iframe 
+                        src="${file.data}" 
+                        style="width: 100%; height: 100%; border: none; background-color: #ffffff;" 
+                        allow="fullscreen; picture-in-picture"
+                        title="File Viewer for ${file.name}"
+                    ></iframe>
+                `;
+            } else {
+                 // Fallback for generic file types
+                viewerContent = `
+                    <div class="p-6 text-center text-gray-400">
+                        <p class="mb-4 text-xl">Cannot display file format.</p>
+                        <p>File Name: ${file.name}</p>
+                        <p>File Type: ${file.type}</p>
+                        <p>Size: ${formatBytes(file.size)}</p>
+                    </div>
+                `;
+            }
+
+            const windowElement = document.createElement('div');
+            windowElement.id = `window-${id}`;
+            windowElement.className = 'window bg-gray-900 border-gray-700/50';
+            windowElement.style.width = '700px'; 
+            windowElement.style.height = '500px'; 
+            windowElement.style.top = `${100 + (openWindows.length * 20) % 100}px`;
+            windowElement.style.left = `${100 + (openWindows.length * 20) % 100}px`;
+            windowElement.style.zIndex = zIndexCounter;
+
+            windowElement.innerHTML = `
+                <div class="window-title-bar flex justify-between items-center p-2 bg-gray-700/80 text-sm rounded-t-lg text-white">
+                    <span class="font-medium flex items-center">
+                        ${getFileTypeIcon(file.type)} <span class="ml-2">Viewing: ${file.name}</span>
+                    </span>
+                    <div class="flex space-x-2">
+                         <button class="window-control text-gray-300 hover:text-white" onclick="window.minimizeWindow('${id}')">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path></svg>
+                        </button>
+                        <button class="window-control text-gray-300 hover:text-red-500" onclick="window.closeWindow('${id}')">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="window-content flex-grow overflow-auto p-2 bg-white text-gray-900">
+                    ${viewerContent}
+                </div>
+            `;
+
+            document.getElementById('windows-container').appendChild(windowElement);
+            openWindows.push({ id: id, element: windowElement, minimized: false, maximized: false, lastPosition: { top: windowElement.style.top, left: windowElement.style.left, width: windowElement.style.width, height: windowElement.style.height } });
+            
+            windowElement.addEventListener('mousedown', () => focusWindow(id));
+            windowElement.querySelector('.window-title-bar').addEventListener('mousedown', (e) => startWindowDrag(e, windowElement));
+            windowElement.querySelector('.window-title-bar').addEventListener('touchstart', (e) => startWindowDrag(e, windowElement));
+            setupResize(windowElement);
+            updateMinimizedTaskbar();
+        };
+        window.openFileViewer = (fileId) => {
+            const file = USER_FILES.find(f => f.id === fileId);
+            if (file) {
+                createFileViewerWindow(file);
+            }
+        };
+
+        // --- File List Renderer ---
+
+        const renderFileList = () => {
+            const listContainer = document.getElementById('my-pc-file-list');
+            if (!listContainer) return;
+
+            if (USER_FILES.length === 0) {
+                listContainer.innerHTML = '<div class="p-4 text-center text-gray-500">No files saved in Local Storage. Drop files above to begin.</div>';
+                return;
+            }
+
+            listContainer.innerHTML = `
+                <div class="font-bold text-sm text-gray-400 grid grid-cols-12 gap-2 p-2 border-b border-gray-700">
+                    <span class="col-span-6">Name</span>
+                    <span class="col-span-3">Type</span>
+                    <span class="col-span-2">Size</span>
+                    <span class="col-span-1"></span>
+                </div>
+            `;
+
+            USER_FILES.forEach(file => {
+                const row = document.createElement('div');
+                row.className = 'file-list-row grid grid-cols-12 gap-2 items-center p-2 text-sm border-b border-gray-800';
+                row.setAttribute('ondblclick', `window.openFileViewer('${file.id}')`);
+                row.innerHTML = `
+                    <span class="col-span-6 flex items-center truncate">
+                        <span class="mr-2">${getFileTypeIcon(file.type)}</span> ${file.name}
+                    </span>
+                    <span class="col-span-3 truncate text-gray-400">${file.type.split('/')[1] || 'file'}</span>
+                    <span class="col-span-2 text-gray-400">${formatBytes(file.size)}</span>
+                    <span class="col-span-1 flex justify-end">
+                        <button onclick="event.stopPropagation(); window.deleteFile('${file.id}')" class="text-red-500 hover:text-red-400 p-1 rounded">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                        </button>
+                    </span>
+                `;
+                listContainer.appendChild(row);
+            });
+        };
+
+
+        // --- Window Management and Content Rendering ---
+        
+        const createWindow = (app) => {
+            const existingWindow = openWindows.find(w => w.id === app.id);
+            if (existingWindow) {
+                if (existingWindow.minimized) {
+                    restoreWindow(app.id);
+                } else {
+                    focusWindow(app.id);
+                }
+                return;
+            }
+
+            focusWindow(app.id); 
+
+            const windowElement = document.createElement('div');
+            windowElement.id = `window-${app.id}`;
+            windowElement.className = 'window bg-gray-900 border-gray-700/50';
+            windowElement.style.width = app.id === 'my-pc' ? '800px' : (app.id === 'browser' ? '800px' : '600px'); 
+            windowElement.style.height = app.id === 'my-pc' ? '600px' : (app.id === 'browser' ? '600px' : '400px'); 
+            windowElement.style.top = `${50 + (openWindows.length * 20) % 100}px`;
+            windowElement.style.left = `${50 + (openWindows.length * 20) % 100}px`;
+            windowElement.style.zIndex = zIndexCounter;
+
+            windowElement.innerHTML = `
+                <div class="window-title-bar flex justify-between items-center p-2 bg-gray-700/80 text-sm rounded-t-lg text-white">
+                    <span class="font-medium flex items-center">
+                        <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 24 24"><path d="${app.icon}"/></svg>
+                        ${app.name}
+                    </span>
+                    <div class="flex space-x-2">
+                        <button class="window-control text-gray-300 hover:text-white" onclick="window.minimizeWindow('${app.id}')">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path></svg>
+                        </button>
+                        <button class="window-control text-gray-300 hover:text-white" onclick="window.toggleMaximize('${app.id}')">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"></path></svg>
+                        </button>
+                        <button class="window-control text-gray-300 hover:text-red-500" onclick="window.closeWindow('${app.id}')">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="window-content flex-grow overflow-auto text-gray-300 p-0">
+                    ${renderAppContent(app.id, app.url)}
+                </div>
+                <!-- Window Footer with Zoom Controls -->
+                <div class="p-2 bg-gray-800/80 text-xs flex justify-end space-x-2 rounded-b-lg">
+                    <span class="text-gray-400 mr-auto">App ID: ${app.id}</span>
+                    <button class="px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded text-xs" onclick="window.zoomWindow('${app.id}', 1.1)">Zoom In</button>
+                    <button class="px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded text-xs" onclick="window.zoomWindow('${app.id}', 0.9)">Zoom Out</button>
+                </div>
+            `;
+
+            document.getElementById('windows-container').appendChild(windowElement);
+            openWindows.push({ id: app.id, element: windowElement, minimized: false, maximized: false, lastPosition: { top: windowElement.style.top, left: windowElement.style.left, width: windowElement.style.width, height: windowElement.style.height } });
+            
+            // Add drag and focus listeners
+            windowElement.addEventListener('mousedown', () => focusWindow(app.id));
+            windowElement.querySelector('.window-title-bar').addEventListener('mousedown', (e) => startWindowDrag(e, windowElement));
+            windowElement.querySelector('.window-title-bar').addEventListener('touchstart', (e) => startWindowDrag(e, windowElement));
+
+            setupResize(windowElement);
+            updateMinimizedTaskbar();
+            handlePostWindowRender(app.id); 
+        };
+
+        const renderAppContent = (id, url) => {
+            if (id === 'browser' && url) {
+                return `
+                    <iframe src="${url}" 
+                        style="width: 100%; height: 100%; border: none; background-color: #0f172a;" 
+                        title="Kurdish Translate App"
+                    ></iframe>
+                `;
+            }
+            if (id === 'my-pc') {
+                return `
+                    <div class="p-4 flex flex-col h-full space-y-4 text-gray-300">
+                        <div id="drop-area" 
+                            class="drop-area p-6 text-center rounded-lg h-32 flex flex-col justify-center items-center text-gray-500"
+                            ondragover="event.preventDefault(); this.classList.add('drop-area-hover')"
+                            ondragleave="this.classList.remove('drop-area-hover')"
+                            ondrop="event.preventDefault(); this.classList.remove('drop-area-hover'); window.handleFiles(event.dataTransfer.files);"
+                            onclick="document.getElementById('file-upload-input').click()"
+                        >
+                            <svg class="w-6 h-6 mb-2" fill="currentColor" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                            <p class="text-sm">Drag & Drop files here, or click to browse (Photos, Videos, PDF, HTML, Text).</p>
+                            <p class="text-xs text-red-400">Warning: Max 5MB per file due to Local Storage limits!</p>
+                            <input type="file" id="file-upload-input" onchange="window.handleFiles(this.files)" accept="image/*,video/*,application/pdf,text/*" class="hidden" multiple>
+                        </div>
+
+                        <div class="flex-grow overflow-y-auto bg-gray-800 rounded-lg border border-gray-700">
+                            <div id="my-pc-file-list" class="divide-y divide-gray-700">
+                                <!-- File list content goes here -->
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            switch (id) {
+                case 'settings':
+                    const currentBgColor = DESKTOP_SETTINGS.desktopColor;
+                    const clockChecked = DESKTOP_SETTINGS.showClock;
+                    const clockSize = DESKTOP_SETTINGS.clockSize;
+                    const clockFormat = DESKTOP_SETTINGS.clockFormat;
+                    
+                    return `
+                        <div class="p-4 overflow-auto h-full space-y-6">
+                            <h2 class="text-xl font-bold mb-5 border-b border-gray-700 pb-2">Desktop Settings</h2>
+                            
+                            <!-- 1. Appearance -->
+                            <div>
+                                <h3 class="font-semibold mb-3 text-lg">1. Appearance</h3>
+                                <div class="mb-4">
+                                    <label class="block text-sm font-medium mb-2">Solid Background Color:</label>
+                                    <div class="flex space-x-3">
+                                        <button onclick="window.changeDesktopColor('bg-gray-800')" class="w-10 h-10 rounded-full bg-gray-800 ring-2 ${currentBgColor === 'bg-gray-800' ? 'ring-white' : 'ring-transparent'} hover:ring-white transition"></button>
+                                        <button onclick="window.changeDesktopColor('bg-blue-900')" class="w-10 h-10 rounded-full bg-blue-900 ring-2 ${currentBgColor === 'bg-blue-900' ? 'ring-white' : 'ring-transparent'} hover:ring-white transition"></button>
+                                        <button onclick="window.changeDesktopColor('bg-green-800')" class="w-10 h-10 rounded-full bg-green-800 ring-2 ${currentBgColor === 'bg-green-800' ? 'ring-white' : 'ring-transparent'} hover:ring-white transition"></button>
+                                        <button onclick="window.changeDesktopColor('bg-purple-900')" class="w-10 h-10 rounded-full bg-purple-900 ring-2 ${currentBgColor === 'bg-purple-900' ? 'ring-white' : 'ring-transparent'} hover:ring-white transition"></button>
+                                    </div>
+                                </div>
+                                
+                                <div class="mt-4 border-t border-gray-700 pt-4">
+                                    <label class="block text-sm font-medium mb-2">Custom Background Image:</label>
+                                    <input type="file" id="bg-image-uploader" accept="image/*" class="text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-500 file:text-white hover:file:bg-blue-600 cursor-pointer"/>
+                                    <button onclick="window.clearBackgroundImage()" class="ml-4 mt-2 sm:mt-0 px-3 py-1 bg-red-600 hover:bg-red-700 rounded-md text-sm transition">Clear Image</button>
+                                </div>
+                            </div>
+                            
+                            <!-- 2. Time & Taskbar Settings (New Section) -->
+                            <div class="mt-6 border-t border-gray-700 pt-4">
+                                <h3 class="font-semibold mb-3 text-lg">2. Time & Display</h3>
+                                
+                                <!-- Clock Visibility Toggle -->
+                                <div class="flex items-center justify-between p-2 rounded-md bg-gray-800/50 mb-4">
+                                    <label for="show-clock" class="text-sm font-medium">Show Clock on Desktop (Top Right)</label>
+                                    <input type="checkbox" id="show-clock" class="form-checkbox h-5 w-5 text-blue-600 rounded border-gray-700 bg-gray-700 focus:ring-blue-500" ${clockChecked ? 'checked' : ''} onchange="window.toggleClockDisplay(this.checked)">
+                                </div>
+
+                                <!-- Clock Size Selector -->
+                                <div class="mb-4">
+                                    <label class="block text-sm font-medium mb-2">Clock Size:</label>
+                                    <div class="flex space-x-3">
+                                        <button onclick="window.changeClockSize('sm')" class="px-3 py-1 rounded text-xs transition ${clockSize === 'sm' ? 'bg-blue-600' : 'bg-gray-600 hover:bg-gray-500'}">Small</button>
+                                        <button onclick="window.changeClockSize('md')" class="px-3 py-1 rounded text-sm transition ${clockSize === 'md' ? 'bg-blue-600' : 'bg-gray-600 hover:bg-gray-500'}">Medium</button>
+                                        <button onclick="window.changeClockSize('lg')" class="px-3 py-1 rounded text-base transition ${clockSize === 'lg' ? 'bg-blue-600 font-semibold' : 'bg-gray-600 hover:bg-gray-500'}">Large</button>
+                                    </div>
+                                </div>
+
+                                <!-- Clock Format Selector -->
+                                <div class="mb-4">
+                                    <label class="block text-sm font-medium mb-2">Clock Format:</label>
+                                    <div class="flex space-x-3">
+                                        <button onclick="window.changeClockFormat('12hr')" class="px-3 py-1 rounded text-sm transition ${clockFormat === '12hr' ? 'bg-blue-600' : 'bg-gray-600 hover:bg-gray-500'}">12-Hour (AM/PM)</button>
+                                        <button onclick="window.changeClockFormat('24hr')" class="px-3 py-1 rounded text-sm transition ${clockFormat === '24hr' ? 'bg-blue-600' : 'bg-gray-600 hover:bg-gray-500'}">24-Hour (HH:MM)</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    `;
+                case 'notes':
+                    return `
+                        <div class="p-4 h-full">
+                            <h2 class="text-xl font-bold mb-3">Scratchpad Notes</h2>
+                            <textarea class="w-full h-full p-3 bg-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none" placeholder="Start typing your note..."></textarea>
+                        </div>
+                    `;
+                default:
+                    return `<div class="p-4"><p>Content for ${id} goes here.</p></div>`;
+            }
+        };
+
+        // --- Post-Render Setup (For dynamic elements like file lists) ---
+        const handlePostWindowRender = (appId) => {
+            if (appId === 'settings') {
+                const uploader = document.getElementById('bg-image-uploader');
+                if (uploader) {
+                    uploader.addEventListener('change', window.handleImageUpload);
+                }
+            } else if (appId === 'my-pc') {
+                renderFileList();
+            }
+        };
+
+        // --- Settings Handlers ---
+
+        window.changeDesktopColor = (colorClass) => {
+            DESKTOP_SETTINGS.desktopColor = colorClass;
+            DESKTOP_SETTINGS.backgroundImage = null; 
+            saveState();
+            renderDesktop();
+        };
+
+        window.handleImageUpload = (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (file.size > 5 * 1024 * 1024) { 
+                document.getElementById('status-message').textContent = 'Status: Image too large (>5MB) for local storage.';
+                document.getElementById('status-message').classList.replace('text-green-400', 'text-red-400');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                DESKTOP_SETTINGS.backgroundImage = e.target.result; 
+                saveState();
+                renderDesktop(); 
+            };
+            reader.readAsDataURL(file);
+        };
+
+        window.clearBackgroundImage = () => {
+            DESKTOP_SETTINGS.backgroundImage = null;
+            saveState();
+            renderDesktop();
+        };
+
+        // New Clock Handlers
+        window.toggleClockDisplay = (show) => {
+            DESKTOP_SETTINGS.showClock = show;
+            saveState();
+            updateClock(); 
+        };
+
+        window.changeClockSize = (size) => {
+            DESKTOP_SETTINGS.clockSize = size;
+            saveState();
+            updateClock(); 
+        };
+
+        window.changeClockFormat = (format) => {
+            DESKTOP_SETTINGS.clockFormat = format;
+            saveState();
+            updateClock(); 
+        };
+
+
+        // --- Window Control Handlers ---
+
+        window.closeWindow = (id) => {
+            const index = openWindows.findIndex(w => w.id === id);
+            if (index > -1) {
+                openWindows[index].element.remove();
+                openWindows.splice(index, 1);
+            }
+            updateMinimizedTaskbar();
+        };
+
+        window.minimizeWindow = (id) => {
+            const windowObj = openWindows.find(w => w.id === id);
+            if (windowObj && !windowObj.minimized) {
+                windowObj.element.style.display = 'none';
+                windowObj.minimized = true;
+                updateMinimizedTaskbar();
+            }
+        };
+
+        const restoreWindow = (id) => {
+            const windowObj = openWindows.find(w => w.id === id);
+            if (windowObj && windowObj.minimized) {
+                windowObj.element.style.display = 'flex';
+                windowObj.minimized = false;
+                focusWindow(id);
+                updateMinimizedTaskbar();
+            }
+        };
+        window.restoreWindow = restoreWindow; 
+
+        const focusWindow = (id) => {
+            zIndexCounter++;
+            const windowObj = openWindows.find(w => w.id === id);
+            if (windowObj) {
+                windowObj.element.style.zIndex = zIndexCounter;
+            }
+        };
+
+        window.toggleMaximize = (id) => {
+            const windowObj = openWindows.find(w => w.id === id);
+            if (!windowObj) return;
+
+            const el = windowObj.element;
+            
+            if (windowObj.maximized) {
+                el.classList.remove('maximized', 'rounded-none');
+                el.style.top = windowObj.lastPosition.top;
+                el.style.left = windowObj.lastPosition.left;
+                el.style.width = windowObj.lastPosition.width;
+                el.style.height = windowObj.lastPosition.height;
+                windowObj.maximized = false;
+            } else {
+                windowObj.lastPosition = {
+                    top: el.style.top,
+                    left: el.style.left,
+                    width: el.style.width,
+                    height: el.style.height
+                };
+                el.classList.add('maximized', 'rounded-none');
+                windowObj.maximized = true;
+            }
+            focusWindow(id);
+        };
+
+        window.zoomWindow = (id, scaleFactor) => {
+            const windowElement = document.getElementById(`window-${id}`);
+            if (!windowElement) return;
+
+            const contentElement = windowElement.querySelector('.window-content');
+            if (!contentElement) return;
+
+            let currentScale = parseFloat(contentElement.style.transform.replace('scale(', '').replace(')', '')) || 1;
+            let newScale = currentScale * scaleFactor;
+
+            newScale = Math.max(0.7, Math.min(1.5, newScale));
+
+            contentElement.style.transformOrigin = 'top left';
+            contentElement.style.transform = `scale(${newScale})`;
+        };
+
+        // --- Dragging Functionality for Windows ---
+        let activeDragWindow = null;
+
+        const startWindowDrag = (e, windowElement) => {
+            if (windowElement.classList.contains('maximized')) return; 
+
+            activeDragWindow = windowElement;
+            focusWindow(windowElement.id.replace('window-', ''));
+            windowElement.style.cursor = 'grabbing';
+
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+            offset.x = clientX - windowElement.offsetLeft;
+            offset.y = clientY - windowElement.offsetTop;
+
+            document.addEventListener('mousemove', windowDragMove);
+            document.addEventListener('mouseup', windowDragEnd);
+            document.addEventListener('touchmove', windowDragMove);
+            document.addEventListener('touchend', windowDragEnd);
+        };
+
+        const windowDragMove = (e) => {
+            if (!activeDragWindow) return;
+            e.preventDefault();
+
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+            let newX = clientX - offset.x;
+            let newY = clientY - offset.y;
+
+            newX = Math.max(0, newX);
+            newY = Math.max(0, newY); 
+
+            activeDragWindow.style.left = `${newX}px`;
+            activeDragWindow.style.top = `${newY}px`;
+        };
+
+        const windowDragEnd = () => {
+            if (!activeDragWindow) return;
+
+            activeDragWindow.style.cursor = 'grab';
+            activeDragWindow = null;
+
+            document.removeEventListener('mousemove', windowDragMove);
+            document.removeEventListener('mouseup', windowDragEnd);
+            document.removeEventListener('touchmove', windowDragMove);
+            document.removeEventListener('touchend', windowDragEnd);
+        };
+
+        // --- Window Resize Fallback ---
+
+        const setupResize = (windowElement) => {
+            windowElement.style.resize = 'both';
+            windowElement.style.overflow = 'auto'; 
+        };
+
+        // --- Taskbar and Status Updates ---
+
+        const updateMinimizedTaskbar = () => {
+            const taskbar = document.getElementById('minimized-windows');
+            taskbar.innerHTML = '';
+            
+            const minimizedApps = openWindows.filter(w => w.minimized);
+
+            minimizedApps.forEach(app => {
+                const appDef = APP_DEFINITIONS.find(a => a.id === app.id.replace('viewer-', ''));
+                if (!appDef) return;
+
+                const button = document.createElement('button');
+                button.className = 'flex items-center space-x-2 p-1 px-3 bg-gray-700 hover:bg-gray-600 rounded-md shadow-md text-sm transition text-white';
+                button.title = appDef.name;
+                button.onclick = () => restoreWindow(app.id);
+                button.innerHTML = `
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="${appDef.icon}"/></svg>
+                    <span class="hidden sm:inline">${appDef.name}</span>
+                `;
+                taskbar.appendChild(button);
+            });
+        };
+
+        // --- Render Desktop ---
+
+        window.renderDesktop = () => {
+            const container = document.getElementById('desktop-icons-container');
+            container.innerHTML = '';
+
+            const desktop = document.getElementById('desktop');
+            
+            // 1. Clear previous background properties
+            desktop.className = 'desktop'; 
+            desktop.style.backgroundImage = '';
+            desktop.style.backgroundSize = '';
+            desktop.style.backgroundPosition = '';
+            desktop.style.backgroundRepeat = '';
+            
+            // 2. Apply background image if present
+            if (DESKTOP_SETTINGS.backgroundImage) {
+                desktop.style.backgroundImage = `url('${DESKTOP_SETTINGS.backgroundImage}')`;
+                desktop.style.backgroundSize = 'cover';
+                desktop.style.backgroundPosition = 'center';
+                desktop.style.backgroundRepeat = 'no-repeat';
+                desktop.classList.add('bg-black/50', 'bg-blend-overlay'); 
+            } else {
+                // Apply solid color if no image
+                desktop.classList.add(DESKTOP_SETTINGS.desktopColor || 'bg-gray-800');
+            }
+            
+            // 3. Render Icons
+            APP_DEFINITIONS.forEach(app => {
+                const iconElement = document.createElement('div');
+                iconElement.id = app.id;
+                iconElement.className = 'icon-item p-2 hover:bg-white/10 rounded-lg flex flex-col justify-center items-center';
+                
+                let iconBgColor = 'bg-blue-500';
+                if (app.id === 'browser') iconBgColor = 'bg-orange-500';
+                if (app.id === 'my-pc') iconBgColor = 'bg-emerald-500';
+
+                iconElement.innerHTML = `
+                    <div class="p-2 ${iconBgColor} rounded-lg mb-1 shadow-lg">
+                        <svg class="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="${app.icon}"/></svg>
+                    </div>
+                    <span class="text-xs icon-label text-white text-shadow-sm">${app.name}</span>
+                `;
+
+                const index = APP_DEFINITIONS.indexOf(app);
+                const defaultPos = { x: 30, y: 30 + index * 100 };
+                const pos = ICON_POSITIONS[app.id] || defaultPos;
+                
+                iconElement.style.left = `${pos.x}px`;
+                iconElement.style.top = `${pos.y}px`;
+
+                // Add Drag listeners
+                iconElement.addEventListener('mousedown', (e) => startDrag(e, iconElement));
+                iconElement.addEventListener('touchstart', (e) => startDrag(e, iconElement));
+
+                // Add Click listener to open window
+                iconElement.addEventListener('mouseup', (e) => {
+                    if (iconElement.dataset.isDragging === 'true') {
+                        return;
+                    }
+                    if (e.button === 0) { // Left click
+                        createWindow(app);
+                    }
+                });
+                iconElement.addEventListener('touchend', (e) => {
+                    if (iconElement.dataset.isDragging === 'true') {
+                        return;
+                    }
+                    createWindow(app);
+                });
+
+                container.appendChild(iconElement);
+            });
+        };
+
+        // --- Initialization ---
+
+        window.onload = () => {
+            loadState(); 
+            window.renderDesktop(); 
+            
+            // Start the clock and update it
+            updateClock();
+            setInterval(updateClock, 1000);
+        };
+    </script>
+</body>
+</html>
+
+
